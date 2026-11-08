@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="pt-BR">
+    <head>
+        <title>DreamLink VR</title>
+        <meta charset="UTF-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+        />
+        <meta name="theme-color" content="#0e0f12" />
+
+        <!--
+            DreamLink VR — SuperSplat Viewer (MIT, PlayCanvas) com o controle Google Daydream embutido.
+            O viewer e o motor vêm do npm via jsDelivr; o controle vem de ./dreamlink-xr.js.
+
+            Parâmetros:
+              ?content=URL   arquivo da cena (.sog, .ply, .compressed.ply, meta.json, lod-meta.json)
+              ?settings=URL  settings.json da cena (opcional)
+              ?scene=ID      cena publicada no superspl.at (quando o endereço do arquivo for conhecido)
+        -->
+        <script type="importmap">
+            {
+                "imports": {
+                    "playcanvas": "https://cdn.jsdelivr.net/npm/playcanvas@2.23.3/build/playcanvas.mjs",
+                    "playcanvas/": "https://cdn.jsdelivr.net/npm/playcanvas@2.23.3/",
+                    "supersplat-viewer": "https://cdn.jsdelivr.net/npm/@playcanvas/supersplat-viewer@1.42.1/dist/viewer.js"
+                }
+            }
+        </script>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@playcanvas/supersplat-viewer@1.42.1/dist/viewer.css" />
+
+        <!-- precisa rodar antes do viewer, para enxergar a sessão VR desde o início -->
+        <script src="./dreamlink-xr.js"></script>
+
+        <style>
+            :root {
+                --bg: #0e0f12;
+                --panel: #181a20;
+                --line: #2a2d36;
+                --ink: #e9eaee;
+                --dim: #8a8f9c;
+                --accent: #4fd1c5;
+            }
+            html,
+            body {
+                height: 100%;
+                margin: 0;
+                overflow: hidden;
+                background: var(--bg);
+                color: var(--ink);
+                font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            }
+            #home {
+                position: fixed;
+                inset: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 16px;
+                box-sizing: border-box;
+                overflow: auto;
+            }
+            #home[hidden] {
+                display: none;
+            }
+            .card {
+                width: 100%;
+                max-width: 520px;
+            }
+            .card h1 {
+                font-size: 30px;
+                letter-spacing: -0.02em;
+                margin: 0 0 6px;
+            }
+            .card h1 span {
+                color: var(--accent);
+            }
+            .card p {
+                color: var(--dim);
+                margin: 0 0 22px;
+                line-height: 1.5;
+            }
+            label {
+                display: block;
+                font-size: 13px;
+                color: var(--dim);
+                margin-bottom: 8px;
+            }
+            .row {
+                display: flex;
+                gap: 8px;
+            }
+            input {
+                flex: 1;
+                min-width: 0;
+                background: var(--panel);
+                color: var(--ink);
+                border: 1px solid var(--line);
+                border-radius: 12px;
+                padding: 13px 14px;
+                font-size: 15px;
+                outline: none;
+            }
+            input:focus {
+                border-color: var(--accent);
+            }
+            button.go {
+                background: var(--accent);
+                color: #001b18;
+                border: 0;
+                border-radius: 12px;
+                padding: 0 18px;
+                font-weight: 700;
+                font-size: 15px;
+            }
+            #msg {
+                min-height: 20px;
+                margin-top: 12px;
+                font-size: 13px;
+                color: #ffb454;
+                line-height: 1.5;
+            }
+            .tips {
+                margin-top: 26px;
+                border-top: 1px solid var(--line);
+                padding-top: 18px;
+                font-size: 13px;
+                color: var(--dim);
+                line-height: 1.7;
+            }
+            .tips b {
+                color: var(--ink);
+                font-weight: 600;
+            }
+        </style>
+    </head>
+    <body>
+        <section id="home" hidden>
+            <div class="card">
+                <h1>Dream<span>Link</span> VR</h1>
+                <p>Abra uma cena 3D e navegue no óculos com o controle Daydream.</p>
+                <label for="src">Link da cena ou do arquivo</label>
+                <div class="row">
+                    <input id="src" type="url" inputmode="url" autocomplete="off" placeholder="superspl.at/scene/… ou https://…/scene.sog" />
+                    <button class="go" id="open" type="button">Abrir</button>
+                </div>
+                <div id="msg" role="status"></div>
+                <div class="tips">
+                    <b>1.</b> Toque em <b>Conectar Daydream</b> e escolha o controle.<br />
+                    <b>2.</b> Abra a cena e toque em <b>VR</b>.<br />
+                    <b>3.</b> Aponte para frente e aperte <b>Home</b> para centralizar.<br />
+                    Clique segurado mostra o arco, soltar teleporta · touch ↑↓ anda · ←→ gira.
+                </div>
+            </div>
+        </section>
+
+        <script type="module">
+            const home = document.getElementById('home');
+            const input = document.getElementById('src');
+            const msg = document.getElementById('msg');
+            const here = new URL(location.href);
+
+            // ---- resolução de links -------------------------------------------------------
+            // superspl.at: o endereço do arquivo de cada cena ainda não é conhecido; quando for,
+            // ele entra em SCENE_CONTENT (o {id} é trocado pelo identificador da cena).
+            const SCENE_CONTENT = null;
+            const SCENE_SETTINGS = null;
+
+            const sceneId = (text) => {
+                const m = String(text).match(/superspl\.at\/(?:scene|view|s)\/?(?:\?id=)?([0-9a-z]{6,})/i);
+                return m ? m[1] : /^[0-9a-f]{8}$/i.test(String(text).trim()) ? String(text).trim() : null;
+            };
+
+            const resolve = (text) => {
+                const t = String(text || '').trim();
+                if (!t) return null;
+                const id = sceneId(t);
+                if (id) {
+                    if (!SCENE_CONTENT) return { error: 'Cenas do superspl.at ainda não abrem por aqui. Use o link direto do arquivo da cena (.sog, .ply ou meta.json).' };
+                    return {
+                        content: SCENE_CONTENT.replace('{id}', id),
+                        settings: SCENE_SETTINGS ? SCENE_SETTINGS.replace('{id}', id) : null
+                    };
+                }
+                try {
+                    const u = new URL(/^https?:\/\//i.test(t) ? t : 'https://' + t);
+                    return { content: u.href, settings: null };
+                } catch {
+                    return { error: 'Link inválido.' };
+                }
+            };
+
+            const open = () => {
+                const r = resolve(input.value);
+                if (!r) return;
+                if (r.error) {
+                    msg.textContent = r.error;
+                    return;
+                }
+                const next = new URL(location.pathname, location.origin);
+                next.searchParams.set('content', r.content);
+                if (r.settings) next.searchParams.set('settings', r.settings);
+                location.href = next.href;
+            };
+            document.getElementById('open').addEventListener('click', open);
+            input.addEventListener('keydown', (e) => e.key === 'Enter' && open());
+
+            // ---- abrir a cena ---------------------------------------------------------------
+            let content = here.searchParams.get('content');
+            let settingsUrl = here.searchParams.get('settings');
+            const shared = here.searchParams.get('scene') || here.searchParams.get('text') || here.searchParams.get('url');
+            if (!content && shared) {
+                const r = resolve(shared);
+                if (r && !r.error) {
+                    content = r.content;
+                    settingsUrl = settingsUrl || r.settings;
+                } else if (r && r.error) {
+                    input.value = shared;
+                    msg.textContent = r.error;
+                }
+            }
+
+            if (!content) {
+                home.hidden = false;
+            } else {
+                boot(content, settingsUrl).catch((err) => {
+                    console.error(err);
+                    home.hidden = false;
+                    input.value = content;
+                    msg.textContent = 'Não consegui carregar a cena: ' + (err && err.message ? err.message : err);
+                });
+            }
+
+            async function boot(contentUrl, settings) {
+                const { createViewer } = await import('supersplat-viewer');
+                // configurações mínimas válidas para cenas sem settings.json (formato v1, migrado pelo viewer)
+                const DEFAULT_SETTINGS = { background: { color: [0, 0, 0] }, camera: {}, animTracks: [] };
+                const settingsPromise = settings
+                    ? fetch(settings).then((r) => (r.ok ? r.json() : DEFAULT_SETTINGS)).catch(() => DEFAULT_SETTINGS)
+                    : Promise.resolve(DEFAULT_SETTINGS);
+                createViewer({
+                    container: document.body,
+                    settings: settingsPromise,
+                    contentUrl,
+                    // lod-meta.json é baixado pelo próprio motor; os demais formatos já começam a baixar aqui
+                    contents: /lod-meta\.json$/i.test(new URL(contentUrl, location.href).pathname)
+                        ? undefined
+                        : fetch(contentUrl).then((r) => {
+                              if (!r.ok) throw new Error('HTTP ' + r.status + ' ao baixar a cena');
+                              return r;
+                          }),
+                    // WebGL direto: o VR não aceita WebGPU, e assim a página não precisa recarregar
+                    renderer: 'webgl',
+                    ui: !here.searchParams.has('noui'),
+                    vr: here.searchParams.has('vr'),
+                    exposeGlobals: true
+                });
+            }
+        </script>
+    </body>
+</html>
